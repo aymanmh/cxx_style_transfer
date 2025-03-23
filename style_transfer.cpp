@@ -10,29 +10,13 @@
 #include <opencv2/imgproc.hpp>
 #include <iostream>
 
+
+constexpr int64 IMAGE_HEIGHT = 720;
+constexpr int64 IMAGE_WIDTH = 720;
+constexpr int IMAGE_CHANNELS = 3;
+
 std::vector<float> loadImage(const std::string& filename, int sizeX, int sizeY);
 
-/**
- * convert input from HWC format to CHW format
- * \param input A single image. The byte array has length of 3*h*w
- * \param h image height
- * \param w image width
- * \param output A float array. should be freed by caller after use
- * \param output_count Array length of the `output` param
- */
-
-void hwc_to_chw(const uint8_t* input, size_t h, size_t w, float** output, size_t* output_count) {
-    size_t stride = h * w;
-    *output_count = stride * 3;
-    float* output_data = (float*)malloc(*output_count * sizeof(float));
-    assert(output_data != NULL);
-    for (size_t i = 0; i != stride; ++i) {
-        for (size_t c = 0; c != 3; ++c) {
-            output_data[c * stride + i] = input[i * 3 + c];
-        }
-    }
-    *output = output_data;
-}
 
 /**
  * convert input from CHW format to HWC format
@@ -41,7 +25,7 @@ void hwc_to_chw(const uint8_t* input, size_t h, size_t w, float** output, size_t
  * \param w image width
  * \param output A byte array. should be freed by caller after use
  */
-static void chw_to_hwc(const float* input, size_t h, size_t w, uint8_t* output) {
+static void chw_to_hwc(const float* input,const size_t h, const size_t w, uint8_t* output) {
     size_t stride = h * w;
 
     for (size_t c = 0; c != 3; ++c) {
@@ -55,36 +39,26 @@ static void chw_to_hwc(const float* input, size_t h, size_t w, uint8_t* output) 
 }
 
 static void usage() { std::cout << "usage: <model_path> <input_file> <output_file> [cpu|cuda|dml]" << std::endl; }
-int run_inference(Ort::Session* session, Ort::RunOptions* runOptions, std::string const& input_file,
+static int run_inference(Ort::Session* session, Ort::RunOptions* runOptions, std::string const& input_file,
     std::string const& output_file) {
-    size_t input_height;
-    size_t input_width;
-    float* model_input;
-    size_t model_input_ele_count;
-
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
 
-    constexpr int64_t numChannels = 3;
-    constexpr int64_t imageWidth = 720;
-    constexpr int64_t imageHeight = 720;
-    constexpr int64_t numInputElements = numChannels * imageWidth * imageHeight;
 
-    const std::array<int64_t, 4> inputShape = { 1, numChannels, imageHeight, imageWidth };
-    const std::array<int64_t, 4> outputShape = { 1, numChannels, imageHeight, imageWidth };
+    constexpr int64_t numInputElements = IMAGE_HEIGHT * IMAGE_WIDTH * IMAGE_CHANNELS;
+
+    const std::array<int64_t, 4> inputShape = { 1, IMAGE_CHANNELS, IMAGE_HEIGHT, IMAGE_WIDTH };
+    const std::array<int64_t, 4> outputShape = { 1, IMAGE_CHANNELS, IMAGE_HEIGHT, IMAGE_WIDTH };
 
     // define array
     std::vector<float> input(numInputElements);
     std::vector<float> output(numInputElements);
-
-    const int64_t input_shape[] = { 1, 3, 720, 720 };
-
 
     auto inputTensor = Ort::Value::CreateTensor<float>(memory_info, input.data(), input.size(), inputShape.data(), inputShape.size());
     auto outputTensor = Ort::Value::CreateTensor<float>(memory_info, output.data(), output.size(), outputShape.data(),
         outputShape.size());
 
     // load image
-    const std::vector<float> imageVec = loadImage(input_file, 720, 720);
+    const std::vector<float> imageVec = loadImage(input_file, IMAGE_WIDTH, IMAGE_HEIGHT);
     if (imageVec.empty()) {
         std::cout << "Failed to load image: " << input_file << std::endl;
         return 1;
@@ -119,10 +93,10 @@ int run_inference(Ort::Session* session, Ort::RunOptions* runOptions, std::strin
     int ret = 0;
     float* output_tensor_data = NULL;
 
-    std::vector<uint8_t> output_image_data(720 * 720 * 3);
-    chw_to_hwc(outputTensor.GetTensorMutableData<float>(), 720, 720, &output_image_data[0]);
+    std::vector<uint8_t> output_image_data(IMAGE_HEIGHT * IMAGE_WIDTH * IMAGE_CHANNELS);
+    chw_to_hwc(outputTensor.GetTensorMutableData<float>(), IMAGE_HEIGHT, IMAGE_WIDTH, &output_image_data[0]);
 
-    cv::Mat imgbuf = cv::Mat(720, 720, CV_8UC3, &output_image_data[0], 720 * 3);
+    cv::Mat imgbuf = cv::Mat(IMAGE_HEIGHT, IMAGE_WIDTH, CV_8UC3, &output_image_data[0], IMAGE_HEIGHT * IMAGE_CHANNELS);
     cv::imshow("output", imgbuf);
     cv::imwrite(output_file, imgbuf);
 
@@ -131,8 +105,7 @@ int run_inference(Ort::Session* session, Ort::RunOptions* runOptions, std::strin
 
 }
 
-void verify_input_output_count(Ort::Session* session) {
-    size_t count;
+static void verify_input_output_count(Ort::Session* session) {
     assert(session->GetInputCount() == 1);
     assert(session->GetOutputCount() == 1);
 }
@@ -239,13 +212,13 @@ std::vector<float> loadImage(const std::string& filename, int sizeX, int sizeY) 
    // cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
 
     // resize
-    // Wait for a keystroke.
     cv::resize(image, image, cv::Size(sizeX, sizeY));
 
 
     std::vector<cv::Mat> rgb_images;
     cv::split(image, rgb_images);
 
+    // convert to chw
     // Stretch one-channel images to vector
     cv::Mat m_flat_b = rgb_images[0].reshape(1, 1);
     cv::Mat m_flat_g = rgb_images[1].reshape(1, 1);
