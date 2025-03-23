@@ -1,4 +1,4 @@
-# Fast Neural Style Transfer Inference C++ implementation
+# [Fast Neural Style Transfer](https://github.com/jcjohnson/fast-neural-style) Inference C++ implementation
 
 ### This repo rewrites the [fns_candy_style_transfer](https://github.com/microsoft/onnxruntime-inference-examples/blob/main/c_cxx/fns_candy_style_transfer/README.md) example from onnxruntime samples, the change are:
 - Use C++ instead for C.
