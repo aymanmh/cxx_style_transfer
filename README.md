@@ -12,3 +12,6 @@
 - Update the 'include' and 'library' paths for OpenCV (from project settings).
 
 The included model is the candy version of fnst, if other versions are used, input and output data need to be changed accordingly.
+
+
+#### for the us of other fnst models see the other branch of this repo.

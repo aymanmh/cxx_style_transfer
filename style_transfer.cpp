@@ -9,13 +9,14 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 #include <iostream>
+#include <chrono>
 
 
 constexpr int64 IMAGE_HEIGHT = 720;
 constexpr int64 IMAGE_WIDTH = 720;
 constexpr int IMAGE_CHANNELS = 3;
 
-std::vector<float> loadImage(const std::string& filename, int sizeX, int sizeY);
+void loadImage(const std::string& filename, int sizeX, int sizeY, std::vector<float>& inputImage, int& orgWidth, int& orgHieght);
 
 
 /**
@@ -32,7 +33,10 @@ static void chw_to_hwc(const float* input,const size_t h, const size_t w, uint8_
         size_t t = c * stride;
         for (size_t i = 0; i != stride; ++i) {
             float f = input[t + i];
-            if (f < 0.f || f > 255.0f) f = 0;
+            if (f < 0.f)
+                f = 0;
+            else if(f > 255.0f)
+                f = 255.f;
             output[i * 3 + c] = (uint8_t)f;
         }
     }
@@ -41,30 +45,32 @@ static void chw_to_hwc(const float* input,const size_t h, const size_t w, uint8_
 static void usage() { std::cout << "usage: <model_path> <input_file> <output_file> [cpu|cuda|dml]" << std::endl; }
 static int run_inference(Ort::Session* session, Ort::RunOptions* runOptions, std::string const& input_file,
     std::string const& output_file) {
-    auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-
 
     constexpr int64_t numInputElements = IMAGE_HEIGHT * IMAGE_WIDTH * IMAGE_CHANNELS;
 
     const std::array<int64_t, 4> inputShape = { 1, IMAGE_CHANNELS, IMAGE_HEIGHT, IMAGE_WIDTH };
     const std::array<int64_t, 4> outputShape = { 1, IMAGE_CHANNELS, IMAGE_HEIGHT, IMAGE_WIDTH };
 
-    // define array
-    std::vector<float> input(numInputElements);
-    std::vector<float> output(numInputElements);
-
-    auto inputTensor = Ort::Value::CreateTensor<float>(memory_info, input.data(), input.size(), inputShape.data(), inputShape.size());
-    auto outputTensor = Ort::Value::CreateTensor<float>(memory_info, output.data(), output.size(), outputShape.data(),
-        outputShape.size());
+    std::vector<float> imageVec(numInputElements);
+    std::vector<float> inputImage(numInputElements);
+    int orgW , orgH;
 
     // load image
-    const std::vector<float> imageVec = loadImage(input_file, IMAGE_WIDTH, IMAGE_HEIGHT);
+    loadImage(input_file, IMAGE_WIDTH, IMAGE_HEIGHT, imageVec, orgW, orgH);
     if (imageVec.empty()) {
         std::cout << "Failed to load image: " << input_file << std::endl;
         return 1;
     }
 
-    std::copy(imageVec.begin(), imageVec.end(), input.begin());
+    auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
+
+
+
+    auto inputTensor = Ort::Value::CreateTensor<float>(memory_info, imageVec.data(), imageVec.size(), inputShape.data(), inputShape.size());
+    
+    std::vector<float> output(numInputElements);
+    auto outputTensor = Ort::Value::CreateTensor<float>(memory_info, output.data(), output.size(), outputShape.data(),
+        outputShape.size());
 
     assert(inputTensor != nullptr);
     assert(inputTensor.IsTensor());
@@ -78,6 +84,12 @@ static int run_inference(Ort::Session* session, Ort::RunOptions* runOptions, std
     inputName.release();
     outputName.release();
 
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+    auto t1 = high_resolution_clock::now();
+
     // run inference
     try {
         session->Run(*runOptions, inputNames.data(), &inputTensor, 1, outputNames.data(), &outputTensor, 1);
@@ -87,19 +99,30 @@ static int run_inference(Ort::Session* session, Ort::RunOptions* runOptions, std
         return 1;
     }
 
+    auto t2 = high_resolution_clock::now();
+    /* Getting number of milliseconds as an integer. */
+    auto ms_int = duration_cast<milliseconds>(t2 - t1);
+    std::cout<<" time to run:"<< ms_int.count() <<std::endl;
+
     assert(outputTensor != nullptr);
 
     assert(outputTensor.IsTensor());
     int ret = 0;
-    float* output_tensor_data = NULL;
 
     std::vector<uint8_t> output_image_data(IMAGE_HEIGHT * IMAGE_WIDTH * IMAGE_CHANNELS);
-    chw_to_hwc(outputTensor.GetTensorMutableData<float>(), IMAGE_HEIGHT, IMAGE_WIDTH, &output_image_data[0]);
+    chw_to_hwc(output.data(), IMAGE_HEIGHT, IMAGE_WIDTH, &output_image_data[0]);
 
     cv::Mat imgbuf = cv::Mat(IMAGE_HEIGHT, IMAGE_WIDTH, CV_8UC3, &output_image_data[0], IMAGE_HEIGHT * IMAGE_CHANNELS);
-    cv::imshow("output", imgbuf);
-    cv::imwrite(output_file, imgbuf);
+    //cv::cvtColor(imgbuf, imgbuf, cv::COLOR_BGR2RGB);
+    cv::resize(imgbuf, imgbuf, cv::Size(orgW,orgH));
 
+    cv::imshow("output", imgbuf);
+    try {
+        cv::imwrite(output_file, imgbuf);
+    }
+    catch (const cv::Exception& ex) {
+        std::cout << ex.what() << std::endl;
+    }
     cv::waitKey();
     return ret;
 
@@ -130,6 +153,25 @@ int enable_cuda(Ort::SessionOptions* session_options) {
 }
 */
 
+
+cv::Mat hwc2chw(const cv::Mat& image) {
+    std::vector<cv::Mat> rgb_images;
+    cv::split(image, rgb_images);
+
+    // Stretch one-channel images to vector
+    cv::Mat m_flat_r = rgb_images[0].reshape(1, 1);
+    cv::Mat m_flat_g = rgb_images[1].reshape(1, 1);
+    cv::Mat m_flat_b = rgb_images[2].reshape(1, 1);
+
+    // Now we can rearrange channels if need
+    cv::Mat matArray[] = { m_flat_r, m_flat_g, m_flat_b };
+
+    cv::Mat flat_image;
+    // Concatenate three vectors to one
+    cv::hconcat(matArray, 3, flat_image);
+    return flat_image;
+}
+
 #ifdef _WIN32
 int wmain(int argc, wchar_t* argv[]) {
 #else
@@ -139,7 +181,6 @@ int main(int argc, char* argv[]) {
         usage();
         return -1;
     }
-
     std::wstring model_path = std::wstring(argv[1]);
     std::wstring winput_file = std::wstring(argv[2]);
     std::wstring woutput_file = std::wstring(argv[3]);
@@ -201,37 +242,43 @@ int main(int argc, char* argv[]) {
 }
 
 
-std::vector<float> loadImage(const std::string& filename, int sizeX, int sizeY) {
+void loadImage(const std::string& filename, int sizeX, int sizeY, std::vector<float>& inputImage, int& orgWidth, int& orgHieght) {
     cv::Mat image = cv::imread(filename);
+    std::vector<float> vec;
+
     if (image.empty()) {
         std::cout << "No image found.";
-        //return;
+        return vec;
     }
 
-    // convert from BGR to RGB
-   // cv::cvtColor(image, image, cv::COLOR_BGR2RGB);
+    // model accepts BGR, no need to convert
 
+    orgWidth = image.size().width;
+    orgHieght = image.size().height;
     // resize
-    cv::resize(image, image, cv::Size(sizeX, sizeY));
+    cv::resize(image, image, cv::Size(sizeX, sizeY), cv::InterpolationFlags::INTER_AREA);
 
+    //for debugging
+    //cv::imshow("test", image);
+    //cv::waitKey();
 
     std::vector<cv::Mat> rgb_images;
     cv::split(image, rgb_images);
 
     // convert to chw
     // Stretch one-channel images to vector
-    cv::Mat m_flat_b = rgb_images[0].reshape(1, 1);
+    cv::Mat m_flat_r = rgb_images[0].reshape(1, 1);
     cv::Mat m_flat_g = rgb_images[1].reshape(1, 1);
-    cv::Mat m_flat_r = rgb_images[2].reshape(1, 1);
+    cv::Mat m_flat_b = rgb_images[2].reshape(1, 1);
 
     // Now we can rearrange channels if need
-    cv::Mat matArray[] = { m_flat_b, m_flat_g, m_flat_r };
+    cv::Mat matArray[] = { m_flat_r, m_flat_g, m_flat_b };
 
     cv::Mat flat_image;
     // Concatenate three vectors to one
     cv::hconcat(matArray, 3, flat_image);
 
-    std::vector<float> vec;
-    flat_image.convertTo(vec, CV_32FC1);
-    return vec;
+    //std::vector<float> vec;
+    flat_image.convertTo(inputImage, CV_32FC1);
+    //return vec;
 }
