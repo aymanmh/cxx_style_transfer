@@ -248,7 +248,7 @@ void loadImage(const std::string& filename, int sizeX, int sizeY, std::vector<fl
 
     if (image.empty()) {
         std::cout << "No image found.";
-        return vec;
+        return ;
     }
 
     // model accepts BGR, no need to convert
@@ -278,7 +278,5 @@ void loadImage(const std::string& filename, int sizeX, int sizeY, std::vector<fl
     // Concatenate three vectors to one
     cv::hconcat(matArray, 3, flat_image);
 
-    //std::vector<float> vec;
     flat_image.convertTo(inputImage, CV_32FC1);
-    //return vec;
 }

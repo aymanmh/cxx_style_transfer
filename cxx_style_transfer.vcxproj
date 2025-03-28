@@ -149,6 +149,9 @@
   <ItemGroup>
     <None Include=".gitignore" />
     <None Include="Assets\candy.onnx" />
+    <None Include="Assets\la_muse.onnx" />
+    <None Include="Assets\mosaic.onnx" />
+    <None Include="Assets\udnie.onnx" />
     <None Include="packages.config" />
     <None Include="README.md" />
   </ItemGroup>
